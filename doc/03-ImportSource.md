@@ -54,6 +54,32 @@ basedir = "/var/cache/various_files"
 basedir = "/var/cache/sample-nodes"
 ```
 
+Also it is possible to import files from remote hosts. At the moment it is possible to do
+that with fileshipper over sftp. The `imports.ini` could look as follows:
+
+```ini
+[remote files with username and password]
+basedir = "/local/dir/for/sync"
+remote = true
+type = "sftp"
+host = "example.com"
+port = 22
+username = "user01"
+password = "secret01"
+remotedir = "/remote/dir/with/various_files"
+
+[remote files with username and privkey]
+basedir = "/local/dir/for/sync"
+remote = true
+type = "sftp"
+host = "example.com"
+port = 22
+username = "user02"
+privkeyfile = "/path/to/keyfile"
+passphrase = "secret02"
+remotedir = "/remote/dir/with/various_files"
+```
+
 Now you are ready to choose a specific file:
 
 ![Choose a specific file](screenshot/fileshipper/06_fileshipper-choose-file.png)
