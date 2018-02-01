@@ -29,9 +29,10 @@ class ImportSource extends ImportSourceHook
         $basedir  = $this->getSetting('basedir');
         $filename = $this->getSetting('file_name');
         $format   = $this->getSetting('file_format');
+        $merge    = $this->getSetting('file_merge');
 
         if ($filename === '*') {
-            return $this->fetchFiles($basedir, $format);
+            return $this->fetchFiles($basedir, $format, $merge);
         }
 
         return (array) $this->fetchFile($basedir, $filename, $format);
@@ -96,6 +97,22 @@ class ImportSource extends ImportSourceHook
         $basename = $form->getSentOrObjectSetting('file_name');
         if ($basedir === null || $basename === null) {
             return $form;
+        }
+
+        if ($basename === '*') {
+            $form->addElement('select', 'file_merge', array(
+                'label'        => $form->translate('Multiple objects merge?'),
+                'value'        => 'no',
+                'description'  => $form->translate(
+                    'Are there multiple objects in every file and should these objects be merged?'
+                ),
+                'required'     => true,
+                'class'        => 'autosubmit',
+                'multiOptions' => array(
+                    'no'  => $form->translate('No'),
+                    'yes'  => $form->translate('Yes'),
+                ),
+            ));
         }
 
         $filename = sprintf('%s/%s', $basedir, $basename);
@@ -227,11 +244,15 @@ class ImportSource extends ImportSourceHook
         ));
     }
 
-    protected function fetchFiles($basedir, $format)
+    protected function fetchFiles($basedir, $format, $merge)
     {
         $result = array();
         foreach (static::listFiles($basedir) as $file) {
-            $result[$file] = (object) $this->fetchFile($basedir, $file, $format);
+            if($merge === 'yes') {
+                $result = array_merge($result, (array) $this->fetchFile($basedir, $file, $format));
+            } else {
+                $result[$file] = (object) $this->fetchFile($basedir, $file, $format);
+            }
         }
 
         return $result;
