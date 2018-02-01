@@ -10,6 +10,8 @@ use Icinga\Module\Director\Hook\ImportSourceHook;
 use Icinga\Module\Director\Web\Form\QuickForm;
 use Icinga\Module\Fileshipper\Xlsx\Workbook;
 use Symfony\Component\Yaml\Yaml;
+use phpseclib\Net\SFTP;
+use phpseclib\Crypt\RSA;
 
 class ImportSource extends ImportSourceHook
 {
@@ -200,6 +202,26 @@ class ImportSource extends ImportSourceHook
 
     protected function fetchFile($basedir, $file, $format)
     {
+		$config = Config::module('fileshipper', 'imports');
+        $section = null;
+        foreach ($config as $key => $sec) {
+            if (($dir = $sec->get('basedir')) && $dir === $basedir && @is_dir($dir)) {
+                $section = $sec;
+                break;
+            }
+        }
+        
+        if ($section === null) {
+            throw new ConfigurationError(
+                'The basedir "%s" is not in the imports.ini',
+                $basedir
+            );
+        }
+        
+        if ($section->get('remote')) {
+            static::downloadRemoteFile($section, $basedir, $file);
+        }
+
         $filename = $basedir . '/' . $file;
 
         switch ($format) {
@@ -443,7 +465,38 @@ class ImportSource extends ImportSourceHook
     protected static function listFiles($basedir)
     {
         $files = array();
+		
+		$config = Config::module('fileshipper', 'imports');
+        $section = null;
+        foreach ($config as $key => $sec) {
+            if (($dir = $sec->get('basedir')) && $dir === $basedir && @is_dir($dir)) {
+                $section = $sec;
+                break;
+            }
+        }
+        
+        if ($section === null) {
+            throw new ConfigurationError(
+                'The basedir "%s" is not in the imports.ini',
+                $basedir
+            );
+        }
+        
+        if ($section->get('remote')) {
+            $files = static::listFilesRemote($section);
+        } else {
+            $files = static::listFilesLocal($basedir);
+        }
+ 
+        ksort($files);
+ 
+        return $files;
+    }
 
+    protected static function listFilesLocal($basedir)
+    {
+        $files = array();
+		
         $dir = new DirectoryIterator($basedir);
         foreach ($dir as $file) {
             if ($file->isFile()) {
@@ -454,8 +507,151 @@ class ImportSource extends ImportSourceHook
             }
         }
 
-        ksort($files);
-
         return $files;
+    }
+
+	protected static function listFilesRemote($configSection)
+    {
+        if (!isset($configSection->{'type'})) {
+            throw new ConfigurationError(
+                'The remote type is missing in the imports.ini'
+            );
+        }
+        
+        switch($configSection->{'type'}) {
+            case 'sftp':
+                return static::listFilesRemoteSftp($configSection);
+                break;
+            default:
+                throw new ConfigurationError(
+                    'Unsupported remote type: %s',
+                    $configSection->{'type'}
+                );
+                break;
+        }
+    }
+ 
+    protected static function listFilesRemoteSftp($configSection)
+    {
+        $files = array();
+        if(!($host = $configSection->get('host'))) {
+            throw new ConfigurationError(
+                'The host is missing in the imports.ini'
+            );
+        }
+        $port = $configSection->get('port', 22);
+        if(!($username = $configSection->get('username'))) {
+            throw new ConfigurationError(
+                'The username is missing in the imports.ini'
+            );
+        }
+        $password = $configSection->get('password', '');
+        $privkeyfile = $configSection->get('privkeyfile', null);
+        $passphrase = $configSection->get('passphrase', '');
+        if(!($remotedir = $configSection->get('remotedir'))) {
+            throw new ConfigurationError(
+                'The remotedir is missing in the imports.ini'
+            );
+        }
+        $filter = $configSection->get('filter', '.*');
+		
+		$sftp = new SFTP($host);
+		
+        if ($privkeyfile) {
+			$key = new RSA();
+			$key->setPassword($passphrase);
+			$key->loadKey(file_get_contents($privkeyfile));
+			if (!$sftp->login($username, $key)) {
+				throw new IcingaException(
+                    'Unable to authenticate with privkeyfile and passphrase'
+                );
+			}
+        } else {
+			if (!$sftp->login($username, $password)) {
+				throw new IcingaException(
+                    'Unable to authenticate with username and password'
+                );
+			}
+        }
+		
+		$sftp->chdir($remotedir);
+		
+		foreach ($sftp->nlist() as $filename) {
+            if ($filename == "." || $filename == "..")
+                continue;
+            if (!preg_match('/' . $filter . '/', $filename))
+                continue;
+            $files[$filename] = $filename;
+        }
+		
+        return $files;
+    }
+    
+    protected static function downloadRemoteFile($configSection, $basedir, $file)
+    {
+        if (!isset($configSection->{'type'})) {
+            throw new ConfigurationError(
+                'The remote type is missing in the imports.ini'
+            );
+        }
+        
+        switch($configSection->{'type'}) {
+            case 'sftp':
+                return static::downloadRemoteSftpFile($configSection, $basedir, $file);
+                break;
+            default:
+                throw new ConfigurationError(
+                    'Unsupported remote type: %s',
+                    $configSection->{'type'}
+                );
+                break;
+        }
+    }
+    
+    protected static function downloadRemoteSftpFile($configSection, $basedir, $file)
+    {
+        if(!($host = $configSection->get('host'))) {
+            throw new ConfigurationError(
+                'The host is missing in the imports.ini'
+            );
+        }
+        $port = $configSection->get('port', 22);
+        if(!($username = $configSection->get('username'))) {
+            throw new ConfigurationError(
+                'The username is missing in the imports.ini'
+            );
+        }
+        $password = $configSection->get('password', '');
+        $privkeyfile = $configSection->get('privkeyfile', null);
+        $passphrase = $configSection->get('passphrase', '');
+        if(!($remotedir = $configSection->get('remotedir'))) {
+            throw new ConfigurationError(
+                'The remotedir is missing in the imports.ini'
+            );
+        }
+		
+		$sftp = new SFTP($host);
+		
+        if ($privkeyfile) {
+			$key = new RSA();
+			$key->setPassword($passphrase);
+			$key->loadKey(file_get_contents($privkeyfile));
+			if (!$sftp->login($username, $key)) {
+				throw new IcingaException(
+                    'Unable to authenticate with privkeyfile and passphrase'
+                );
+			}
+        } else {
+			if (!$sftp->login($username, $password)) {
+				throw new IcingaException(
+                    'Unable to authenticate with username and password'
+                );
+			}
+        }
+		
+		$sftp->chdir($remotedir);
+		$sftp->get($file, $basedir . '/' . $file);
+		
+        return true;
     }
 }
