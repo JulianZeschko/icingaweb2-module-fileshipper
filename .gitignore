@@ -1,6 +1,6 @@
 ## Editors
 /.idea/
-.*.sw[op]
+.vscode/
 
 ## PHP vendor artifacts
 /vendor/

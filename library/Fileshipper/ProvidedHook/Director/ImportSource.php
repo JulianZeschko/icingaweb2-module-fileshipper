@@ -29,9 +29,10 @@ class ImportSource extends ImportSourceHook
         $basedir  = $this->getSetting('basedir');
         $filename = $this->getSetting('file_name');
         $format   = $this->getSetting('file_format');
+        $merge    = $this->getSetting('file_merge');
 
         if ($filename === '*') {
-            return $this->fetchFiles($basedir, $format);
+            return $this->fetchFiles($basedir, $format, $merge);
         }
 
         return (array) $this->fetchFile($basedir, $filename, $format);
@@ -47,7 +48,7 @@ class ImportSource extends ImportSourceHook
         $form->addElement('select', 'file_format', array(
             'label'        => $form->translate('File format'),
             'description'  => $form->translate(
-                'Available file formats, usually CSV, JSON, YAML and XML. Whether'
+                'Available file formats, usually CSV, JSON, YAML, XML and TXT. Whether'
                 . ' all of those are available eventually depends on various'
                 . ' libraries installed on your system. Please have a look at'
                 . ' the documentation in case your list is not complete.'
@@ -98,6 +99,22 @@ class ImportSource extends ImportSourceHook
             return $form;
         }
 
+        if ($basename === '*') {
+            $form->addElement('select', 'file_merge', array(
+                'label'        => $form->translate('Multiple objects merge?'),
+                'value'        => 'no',
+                'description'  => $form->translate(
+                    'Are there multiple objects in every file and should these objects be merged?'
+                ),
+                'required'     => true,
+                'class'        => 'autosubmit',
+                'multiOptions' => array(
+                    'no'  => $form->translate('No'),
+                    'yes'  => $form->translate('Yes'),
+                ),
+            ));
+        }
+
         $filename = sprintf('%s/%s', $basedir, $basename);
         switch ($format) {
             case 'csv':
@@ -106,6 +123,10 @@ class ImportSource extends ImportSourceHook
 
             case 'xslx':
                 static::addXslxElements($form, $filename);
+                break;
+
+			case 'txt':
+                static::addTxtElements($form);
                 break;
         }
 
@@ -190,11 +211,48 @@ class ImportSource extends ImportSourceHook
         }
     }
 
-    protected function fetchFiles($basedir, $format)
+	protected static function addTxtElements(QuickForm $form)
+    {
+        $form->addElement('text', 'txt_delimiter', array(
+            'label'       => $form->translate('Data delimiter'),
+            'description' => $form->translate(
+                'This sets the data row delimiter. One character only, defaults'
+                . ' to new line: "\n"'
+            ),
+            'value'       => '\n',
+            'required'    => true,
+        ));
+ 
+        $form->addElement('text', 'txt_colname', array(
+            'label'       => $form->translate('Column name'),
+            'description' => $form->translate(
+                'This sets the column name.'
+                . ' Defaults to: "raw"'
+            ),
+            'value'       => 'raw',
+            'required'    => true,
+        ));
+ 
+        $form->addElement('text', 'txt_filter', array(
+            'label'       => $form->translate('Data filter'),
+            'description' => $form->translate(
+                'Only data rows with this filter will imported.'
+                . ' Defaults to any: ".*"'
+            ),
+            'value'       => '.*',
+            'required'    => true,
+        ));
+    }
+
+    protected function fetchFiles($basedir, $format, $merge)
     {
         $result = array();
         foreach (static::listFiles($basedir) as $file) {
-            $result[$file] = (object) $this->fetchFile($basedir, $file, $format);
+            if($merge === 'yes') {
+                $result = array_merge($result, (array) $this->fetchFile($basedir, $file, $format));
+            } else {
+                $result[$file] = (object) $this->fetchFile($basedir, $file, $format);
+            }
         }
 
         return $result;
@@ -236,6 +294,8 @@ class ImportSource extends ImportSourceHook
             case 'xml':
                 libxml_disable_entity_loader(true);
                 return $this->readXmlFile($filename);
+            case 'txt':
+                return $this->readTxtFile($filename);
             default:
                 throw new ConfigurationError(
                     'Unsupported file format: %s',
@@ -417,11 +477,42 @@ class ImportSource extends ImportSourceHook
         return $what;
     }
 
+	protected function readTxtFile($filename)
+    {
+        $lines = array();
+        $delimiter = $this->getSetting('txt_delimiter');
+        $colname = $this->getSetting('txt_colname');
+        $filter = $this->getSetting('txt_filter');
+        
+        $content = @file_get_contents($filename);
+        if ($content === false) {
+            throw new IcingaException(
+                'Unable to read TXT file "%s"',
+                $filename
+            );
+        }
+        
+        $arr = preg_split(
+            '/' . $delimiter . '/',
+            $content,
+            -1,
+            PREG_SPLIT_NO_EMPTY
+        );
+        foreach($arr as $line) {
+            if(preg_match('/' . $filter . '/', $line)) {
+                array_push($lines, (object) array($colname => $line));
+            }
+        }
+ 
+        return $lines;
+    }
+
     protected static function listAvailableFormats(QuickForm $form)
     {
         $formats = array(
             'csv'  => $form->translate('CSV (Comma Separated Value)'),
             'json' => $form->translate('JSON (JavaScript Object Notation)'),
+			'txt' => $form->translate('TXT (any text file)'),
         );
 
         if (class_exists('\\ZipArchive')) {

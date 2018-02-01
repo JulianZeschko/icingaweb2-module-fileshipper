@@ -169,3 +169,26 @@ how to configure such, here you can see part of such a file:
 If this looks foreign to you don't worry, most similar constructs are handled in
 a smooth way by the underlying YAML parser.
 
+
+
+TXT (any text file)
+----------------------------
+
+This could be a solution for no standard formats.
+It imports complete files by a delimiter (default \n).
+After import there is one column (default raw) and multiple rows.
+Each row is a string that is separated by the delimiter.
+It is also possible to filter, that only specific rows will be imported.
+
+### Simple TXT example
+
+```txt
+Unnecessary row that will be ignored by filter
+OS: Linux, Host: localhost, Name: Localhost
+OS: Windows, Host: example.com, Name: Example
+```
+
+In this example the filter could look something like that:
+```OS: .*, Host: .*, Name: .*```
+
+To get the information's OS, Host and Name in different columns, it is possible to separate the "raw" column with the Modifier "Regular expression based replacement" into multiple columns.
